@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SketchPad — Lightweight Web Sketchbook</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#0f1720; --muted:#9aa4b2; --accent:#3b82f6; --card:#0b1220
+    }
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{background:linear-gradient(180deg,#071018, #071627);color:#e6eef8;display:flex;align-items:stretch}
+    .app{display:flex;gap:16px;padding:16px;width:100%;box-sizing:border-box}
+    .left{width:340px;background:var(--panel);border-radius:12px;padding:14px;box-shadow:0 6px 20px rgba(2,6,23,.6)}
+    .canvas-wrap{flex:1;display:flex;flex-direction:column;gap:12px}
+    h1{font-size:18px;margin:0 0 8px 0}
+    .tool-row{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:var(--muted);cursor:pointer}
+    .btn.primary{background:var(--accent);border:0;color:white}
+    .btn.toggle.active{background:rgba(255,255,255,0.06)}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+    input[type=range]{width:100%}
+    .color-input{height:40px;padding:0;border-radius:8px;border:0}
+
+    .stage{flex:1;display:flex;align-items:center;justify-content:center;padding:10px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:10px}
+    .board{background:repeating-linear-gradient(45deg,#ffffff0a 0 10px, transparent 10px 20px);border-radius:6px;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.02)}
+
+    canvas{display:block;border-radius:6px;touch-action:none}
+    .footer{display:flex;gap:8px;align-items:center;justify-content:space-between}
+    .small{font-size:12px;color:var(--muted)}
+    .right-col{width:260px;background:var(--panel);border-radius:12px;padding:12px}
+
+    .file-input{display:none}
+    .layers-list{display:flex;flex-direction:column;gap:8px}
+    .layer{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)}
+    .layer .eye{width:28px;height:28;display:flex;align-items:center;justify-content:center}
+
+    @media (max-width:900px){.app{flex-direction:column}.left,.right-col{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="app" role="application">
+    <div class="left">
+      <h1>SketchPad — Lightweight</h1>
+      <div class="tool-row" style="margin-bottom:8px">
+        <button id="brushBtn" class="btn toggle active">Brush</button>
+        <button id="eraserBtn" class="btn toggle">Eraser</button>
+        <button id="fillBtn" class="btn toggle">Fill</button>
+        <button id="moveBtn" class="btn toggle">Move</button>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <label>Color</label>
+        <input id="color" class="color-input" type="color" value="#0b0b0b" />
+      </div>
+
+      <div style="margin-bottom:10px">
+        <label>Brush size <span id="sizeLabel">8</span> px</label>
+        <input id="size" type="range" min="1" max="200" value="8" />
+      </div>
+
+      <div style="margin-bottom:10px">
+        <label>Opacity <span id="opacityLabel">100%</span></label>
+        <input id="opacity" type="range" min="0.05" max="1" step="0.01" value="1" />
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button id="undo" class="btn">Undo</button>
+        <button id="redo" class="btn">Redo</button>
+        <button id="clear" class="btn">Clear</button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button id="saveBtn" class="btn primary">Save PNG</button>
+        <label class="btn" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">Import
+          <input id="file" class="file-input" type="file" accept="image/*" />
+        </label>
+      </div>
+
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Shortcuts: B = Brush | E = Eraser | Z = Undo | Y = Redo | S = Save</div>
+    </div>
+
+    <div class="canvas-wrap">
+      <div class="stage">
+        <div id="board" class="board" style="width:100%;height:100%;max-width:1200px;max-height:720px;padding:10px;box-sizing:border-box">
+          <canvas id="canvas" class="canvas" width="1200" height="720" style="width:100%;height:100%"></canvas>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="small">Tool: <span id="activeTool">Brush</span></div>
+        <div>
+          <small class="small">Canvas:</small> <span id="dims">1200 × 720</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-col">
+      <h3 style="margin-top:0">Layers</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button id="addLayer" class="btn">+ Add</button>
+        <button id="mergeDown" class="btn">Merge</button>
+      </div>
+      <div class="layers-list" id="layers"></div>
+      <div style="margin-top:12px;font-size:12px;color:var(--muted)">Tip: On tablets use Stylus for best results. This file is fully client-side — no uploads.</div>
+    </div>
+  </div>
+
+  <script>
+    // SketchPad single-file app
+    (function(){
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d',{alpha:true});
+      const colorInput = document.getElementById('color');
+      const sizeInput = document.getElementById('size');
+      const opacityInput = document.getElementById('opacity');
+      const sizeLabel = document.getElementById('sizeLabel');
+      const opacityLabel = document.getElementById('opacityLabel');
+      const activeToolLabel = document.getElementById('activeTool');
+      const dims = document.getElementById('dims');
+
+      let DPR = Math.max(1, window.devicePixelRatio || 1);
+      let W = 1200, H = 720;
+
+      function resizeCanvas(w,h){
+        W = w; H = h;
+        canvas.width = Math.floor(W * DPR);
+        canvas.height = Math.floor(H * DPR);
+        canvas.style.width = W + 'px';
+        canvas.style.height = H + 'px';
+        ctx.setTransform(DPR,0,0,DPR,0,0);
+        redrawAll();
+        dims.textContent = W + ' × ' + H;
+      }
+
+      resizeCanvas(W,H);
+
+      // Layer system (simple): layers array with canvases
+      const layers = [];
+      const layersListEl = document.getElementById('layers');
+      let activeLayerIndex = 0;
+
+      function createLayer(name){
+        const off = document.createElement('canvas');
+        off.width = canvas.width;
+        off.height = canvas.height;
+        off.style.display='none';
+        const layer = {name, canvas: off, visible:true, opacity:1};
+        layers.push(layer);
+        activeLayerIndex = layers.length -1;
+        renderLayersUI();
+        return layer;
+      }
+
+      // start with 2 layers: background & sketch
+      createLayer('Background');
+      createLayer('Layer 1');
+
+      function renderLayersUI(){
+        layersListEl.innerHTML = '';
+        for(let i=layers.length-1;i>=0;i--){
+          const li = document.createElement('div');
+          li.className='layer';
+          li.innerHTML = `<div style="flex:1;display:flex;flex-direction:column"><strong style="font-size:13px">${layers[i].name}</strong><span style="font-size:11px;color:${layers[i].visible? '#9aa4b2':'#555'}">Opacity: ${Math.round(layers[i].opacity*100)}%</span></div>`;
+          const left = document.createElement('div');
+          left.style.display='flex';left.style.gap='6px';
+
+          const eye = document.createElement('button');
+          eye.className='btn';eye.textContent = layers[i].visible? '👁' : '🚫';
+          eye.onclick = ()=>{layers[i].visible = !layers[i].visible; renderLayersUI(); redrawAll();};
+
+          const select = document.createElement('button');
+          select.className='btn';select.textContent='Select';
+          select.onclick = ()=>{activeLayerIndex = i; renderLayersUI();};
+
+          const del = document.createElement('button');
+          del.className='btn';del.textContent='Del';
+          del.onclick = ()=>{ if(layers.length<=1) return alert('Need at least one layer'); layers.splice(i,1); activeLayerIndex = Math.min(activeLayerIndex, layers.length-1); renderLayersUI(); redrawAll(); };
+
+          const opacityRange = document.createElement('input');
+          opacityRange.type='range'; opacityRange.min=0; opacityRange.max=1; opacityRange.step=0.01; opacityRange.value=layers[i].opacity;
+          opacityRange.oninput = (e)=>{layers[i].opacity = parseFloat(e.target.value); renderLayersUI(); redrawAll();};
+          left.appendChild(eye); left.appendChild(select); left.appendChild(del); left.appendChild(opacityRange);
+
+          li.appendChild(left);
+          if(i===activeLayerIndex) li.style.outline='2px solid rgba(59,130,246,0.2)';
+          layersListEl.appendChild(li);
+        }
+      }
+
+      function redrawAll(){
+        // clear main canvas
+        ctx.clearRect(0,0,W,H);
+        // draw layers in order
+        for(let i=0;i<layers.length;i++){
+          if(!layers[i].visible) continue;
+          ctx.globalAlpha = layers[i].opacity;
+          const lc = layers[i].canvas;
+          ctx.drawImage(lc,0,0,W,H);
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // Drawing state
+      let tool = 'brush';
+      let brushColor = colorInput.value;
+      let brushSize = parseInt(sizeInput.value,10);
+      let brushOpacity = parseFloat(opacityInput.value);
+      let drawing = false;
+      let last = {x:0,y:0};
+
+      function setTool(t){ tool=t; activeToolLabel.textContent = t.charAt(0).toUpperCase()+t.slice(1); document.getElementById('brushBtn').classList.toggle('active', t==='brush'); document.getElementById('eraserBtn').classList.toggle('active', t==='eraser'); document.getElementById('fillBtn').classList.toggle('active', t==='fill'); document.getElementById('moveBtn').classList.toggle('active', t==='move'); }
+
+      // event bindings for toolbar
+      document.getElementById('brushBtn').addEventListener('click',()=>setTool('brush'));
+      document.getElementById('eraserBtn').addEventListener('click',()=>setTool('eraser'));
+      document.getElementById('fillBtn').addEventListener('click',()=>setTool('fill'));
+      document.getElementById('moveBtn').addEventListener('click',()=>setTool('move'));
+
+      colorInput.addEventListener('input', (e)=>{brushColor=e.target.value});
+      sizeInput.addEventListener('input',(e)=>{brushSize=parseInt(e.target.value,10); sizeLabel.textContent = brushSize});
+      opacityInput.addEventListener('input',(e)=>{brushOpacity=parseFloat(e.target.value); opacityLabel.textContent = Math.round(brushOpacity*100)+'%'});
+
+      // pointer helpers
+      function getPos(ev){
+        const rect = canvas.getBoundingClientRect();
+        const clientX = ev.touches ? ev.touches[0].clientX : (ev.clientX || ev.changedTouches && ev.changedTouches[0].clientX);
+        const clientY = ev.touches ? ev.touches[0].clientY : (ev.clientY || ev.changedTouches && ev.changedTouches[0].clientY);
+        const x = (clientX - rect.left) * (canvas.width / rect.width) / DPR;
+        const y = (clientY - rect.top) * (canvas.height / rect.height) / DPR;
+        return {x,y};
+      }
+
+      // simple undo/redo using dataURLs per-layer merged
+      const history = {undo:[],redo:[],limit:30};
+      function snapshot(){
+        const temp = document.createElement('canvas'); temp.width = canvas.width; temp.height = canvas.height; const tctx = temp.getContext('2d');
+        for(let i=0;i<layers.length;i++){ if(!layers[i].visible) continue; tctx.globalAlpha = layers[i].opacity; tctx.drawImage(layers[i].canvas,0,0); }
+        tctx.globalAlpha=1; history.undo.push(temp.toDataURL()); if(history.undo.length>history.limit) history.undo.shift(); history.redo = [];
+      }
+      function doUndo(){ if(!history.undo.length) return; const last = history.undo.pop(); history.redo.push(canvas.toDataURL()); restoreFromDataURL(last); }
+      function doRedo(){ if(!history.redo.length) return; const next = history.redo.pop(); history.undo.push(canvas.toDataURL()); restoreFromDataURL(next); }
+      function restoreFromDataURL(dataUrl){ const img = new Image(); img.onload = ()=>{ // draw onto top layer and clear others
+          // set background layer to the image
+          if(layers.length===0) createLayer('Layer');
+          const target = layers[0]; const tctx = target.canvas.getContext('2d'); tctx.clearRect(0,0,target.canvas.width,target.canvas.height); tctx.drawImage(img,0,0,target.canvas.width,target.canvas.height);
+          // clear other layers
+          for(let i=1;i<layers.length;i++){ const c = layers[i].canvas; const cctx = c.getContext('2d'); cctx.clearRect(0,0,c.width,c.height);} renderLayersUI(); redrawAll(); }; img.src = dataUrl; }
+
+      document.getElementById('undo').addEventListener('click', ()=>doUndo());
+      document.getElementById('redo').addEventListener('click', ()=>doRedo());
+      document.getElementById('clear').addEventListener('click', ()=>{ if(!confirm('Clear all layers?')) return; snapshot(); for(let i=0;i<layers.length;i++){ const c = layers[i].canvas; const cctx = c.getContext('2d'); cctx.clearRect(0,0,c.width,c.height);} redrawAll(); });
+
+      document.getElementById('saveBtn').addEventListener('click', ()=>{ // export merged
+        const out = document.createElement('canvas'); out.width = canvas.width; out.height = canvas.height; const outCtx = out.getContext('2d'); for(let i=0;i<layers.length;i++){ if(!layers[i].visible) continue; outCtx.globalAlpha = layers[i].opacity; outCtx.drawImage(layers[i].canvas,0,0); } outCtx.globalAlpha =1; const url = out.toDataURL('image/png'); const a = document.createElement('a'); a.href=url; a.download='sketch.png'; a.click();
+      });
+
+      // import image to active layer
+      const fileInput = document.getElementById('file');
+      fileInput.addEventListener('change',(e)=>{
+        const f = e.target.files[0]; if(!f) return; const reader = new FileReader(); reader.onload = (ev)=>{ const img = new Image(); img.onload=()=>{ snapshot(); const lc = layers[activeLayerIndex].canvas; const lctx = lc.getContext('2d'); lctx.clearRect(0,0,lc.width,lc.height); lctx.drawImage(img,0,0,lc.width,lc.height); redrawAll(); }; img.src = ev.target.result; }; reader.readAsDataURL(f);
+      });
+
+      // add layer
+      document.getElementById('addLayer').addEventListener('click', ()=>{ createLayer('Layer '+(layers.length+1)); renderLayersUI(); });
+      document.getElementById('mergeDown').addEventListener('click', ()=>{
+        if(layers.length<2) return alert('Need at least two layers to merge');
+        snapshot(); const top = layers.pop(); const target = layers[layers.length-1]; const tctx = target.canvas.getContext('2d'); tctx.globalAlpha = top.opacity; tctx.drawImage(top.canvas,0,0); renderLayersUI(); redrawAll();
+      });
+
+      // Pointer events
+      function beginDraw(ev){ ev.preventDefault(); if(tool==='fill'){ snapshot(); doFill(ev); return; } drawing=true; last = getPos(ev); // push snapshot on start
+        snapshot(); drawPoint(last.x,last.y,true);
+      }
+      function moveDraw(ev){ if(!drawing) return; ev.preventDefault(); const p = getPos(ev); drawLine(last.x,last.y,p.x,p.y); last = p; }
+      function endDraw(ev){ if(!drawing) return; drawing=false; }
+
+      canvas.addEventListener('mousedown', beginDraw);
+      canvas.addEventListener('mousemove', moveDraw);
+      window.addEventListener('mouseup', endDraw);
+
+      canvas.addEventListener('touchstart', beginDraw, {passive:false});
+      canvas.addEventListener('touchmove', moveDraw, {passive:false});
+      window.addEventListener('touchend', endDraw);
+
+      // drawing helpers
+      function drawPoint(x,y,flush){ const lc = layers[activeLayerIndex].canvas; const lctx = lc.getContext('2d'); lctx.lineJoin='round'; lctx.lineCap='round'; if(tool==='eraser'){ lctx.globalCompositeOperation='destination-out'; lctx.strokeStyle='rgba(0,0,0,1)'; } else { lctx.globalCompositeOperation='source-over'; lctx.strokeStyle = brushColor; } lctx.globalAlpha = brushOpacity; lctx.lineWidth = brushSize; lctx.beginPath(); lctx.moveTo(x,y); lctx.lineTo(x+0.1,y+0.1); lctx.stroke(); lctx.closePath(); lctx.globalAlpha=1; lctx.globalCompositeOperation='source-over'; if(flush) redrawAll(); }
+      function drawLine(x1,y1,x2,y2){ const lc = layers[activeLayerIndex].canvas; const lctx = lc.getContext('2d'); lctx.lineJoin='round'; lctx.lineCap='round'; if(tool==='eraser'){ lctx.globalCompositeOperation='destination-out'; lctx.strokeStyle='rgba(0,0,0,1)'; } else { lctx.globalCompositeOperation='source-over'; lctx.strokeStyle = brushColor; } lctx.globalAlpha = brushOpacity; lctx.lineWidth = brushSize; lctx.beginPath(); lctx.moveTo(x1,y1); lctx.lineTo(x2,y2); lctx.stroke(); lctx.closePath(); lctx.globalAlpha=1; lctx.globalCompositeOperation='source-over'; redrawAll(); }
+
+      // simple flood fill on active layer
+      function doFill(ev){ const p = getPos(ev); const lc = layers[activeLayerIndex].canvas; const lctx = lc.getContext('2d'); const w = lc.width; const h = lc.height; const imgData = lctx.getImageData(0,0,w,h); const data = imgData.data; const targetX = Math.floor(p.x); const targetY = Math.floor(p.y); const idx = (targetY * w + targetX) * 4; const targetColor = [data[idx],data[idx+1],data[idx+2],data[idx+3]]; const fillColor = hexToRgba(brushColor, Math.round(brushOpacity*255)); if(targetColor[0]===fillColor[0] && targetColor[1]===fillColor[1] && targetColor[2]===fillColor[2] && targetColor[3]===fillColor[3]){ redrawAll(); return;} const stack=[ [targetX,targetY] ]; while(stack.length){ const [x,y]=stack.pop(); if(x<0||y<0||x>=w||y>=h) continue; const i=(y*w+x)*4; if(data[i]===targetColor[0] && data[i+1]===targetColor[1] && data[i+2]===targetColor[2] && data[i+3]===targetColor[3]){ data[i]=fillColor[0]; data[i+1]=fillColor[1]; data[i+2]=fillColor[2]; data[i+3]=fillColor[3]; stack.push([x+1,y]); stack.push([x-1,y]); stack.push([x,y+1]); stack.push([x,y-1]); } }
+        lctx.putImageData(imgData,0,0); redrawAll(); }
+
+      function hexToRgba(hex,a){ const h = hex.replace('#',''); const bigint = parseInt(h.length===3? h.split('').map(c=>c+c).join(''):h,16); const r=(bigint>>16)&255; const g=(bigint>>8)&255; const b=bigint&255; return [r,g,b,a]; }
+
+      // keyboard shortcuts
+      window.addEventListener('keydown',(e)=>{
+        if(e.key==='b') setTool('brush');
+        if(e.key==='e') setTool('eraser');
+        if(e.key==='z') { if(e.ctrlKey||e.metaKey) { doUndo(); } }
+        if(e.key==='y') { if(e.ctrlKey||e.metaKey) { doRedo(); } }
+        if(e.key==='s'){ if(e.ctrlKey||e.metaKey){ e.preventDefault(); document.getElementById('saveBtn').click(); } }
+      });
+
+      // update brush values from inputs realtime
+      setInterval(()=>{ // sync values in case of stylus events
+        sizeLabel.textContent = brushSize;
+        opacityLabel.textContent = Math.round(brushOpacity*100)+'%';
+      },200);
+
+      // handle changes global
+      function updateBrushFromUI(){ brushColor = colorInput.value; brushSize = parseInt(sizeInput.value,10); brushOpacity = parseFloat(opacityInput.value); }
+      colorInput.addEventListener('change', updateBrushFromUI); sizeInput.addEventListener('change', updateBrushFromUI); opacityInput.addEventListener('change', updateBrushFromUI);
+
+      // initial UI sync
+      renderLayersUI(); redrawAll();
+
+      // expose for debugging
+      window.sketchpad = {layers, snapshot, redrawAll, resizeCanvas};
+    })();
+  </script>
+</body>
+</html>
